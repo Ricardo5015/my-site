@@ -81,7 +81,7 @@ export const navBarConfig: NavBarConfig = {
 // ========== 个人资料配置 ==========
 
 export const profileConfig: ProfileConfig = {
-	avatar: "assets/images/Yu.png",   //头像图片路径。相对于 /src 目录。如果以 '/' 开头则相对于 /public 目录
+	avatar: "assets/images/Yu.jpg",   //头像图片路径。相对于 /src 目录。如果以 '/' 开头则相对于 /public 目录
 	name: " Yu ",    // 显示的名字
 	bio: " 读书不肯为人忙 ",    // 个人简介
 
