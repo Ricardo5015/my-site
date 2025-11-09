@@ -62,6 +62,13 @@ export const navBarConfig: NavBarConfig = {
 		LinkPreset.Archive,    // 归档页链接
 		LinkPreset.About,      // 关于页链接
 		
+		{
+          name: "时间管理",
+          url: "/time-management",
+          external: false,
+          }
+		
+		
 		// 自定义链接示例:
 		//{
 		//	name: "GitHub",    // 链接显示的名称
