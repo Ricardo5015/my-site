@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, RotateCcw, Briefcase, Palette, Heart, Coffee, GripHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RotateCcw, Briefcase, Palette, Heart, Coffee, GripVertical } from 'lucide-react';
 
 // ==================== 类型定义 ====================
 type CardType = 'work' | 'rest';
@@ -7,75 +7,74 @@ type CardType = 'work' | 'rest';
 interface ThemeConfig {
   name: string;
   icon: React.ReactNode;
-  // 优雅的配色方案：bg-背景色, text-文字色, ring-边框色
-  style: string;
+  // 定义卡片的主色调，用于背景和边框
+  colorClass: string;
+  shadowClass: string;
 }
 
 interface CalendarDay {
-  date: number | null; // null 代表空白填充格
-  fullDate?: string;   // 完整日期字符串用于唯一标识
+  date: number | null;
+  fullDate?: string;
   type: CardType | null;
-  themeIndex?: number; // 0, 1, 2 对应三天打鱼的不同阶段
-  cardGroupId?: number; // 同一组卡片的唯一标识
+  themeIndex?: number;
+  cardGroupId?: number; // 同一组卡片的唯一ID
+  isStart?: boolean; // 标记是否是这组卡片的第一天
+  isEnd?: boolean;   // 标记是否是这组卡片的最后一天
 }
 
 // ==================== 静态配置 ====================
 
-// 莫兰迪/Notion 风格配色
 const THEMES: ThemeConfig[] = [
   { 
     name: '深度工作', 
-    icon: <Briefcase size={14} />, 
-    style: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200/50 hover:bg-indigo-100' 
+    icon: <Briefcase size={15} strokeWidth={2.5} />, 
+    colorClass: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+    shadowClass: 'shadow-indigo-200'
   },
   { 
     name: '创造探索', 
-    icon: <Palette size={14} />, 
-    style: 'bg-purple-50 text-purple-700 ring-1 ring-purple-200/50 hover:bg-purple-100' 
+    icon: <Palette size={15} strokeWidth={2.5} />, 
+    colorClass: 'bg-purple-100 text-purple-700 border-purple-200',
+    shadowClass: 'shadow-purple-200'
   },
   { 
     name: '身心复原', 
-    icon: <Heart size={14} />, 
-    style: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/50 hover:bg-emerald-100' 
+    icon: <Heart size={15} strokeWidth={2.5} />, 
+    colorClass: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    shadowClass: 'shadow-emerald-200'
   }
 ];
 
 const REST_THEME: ThemeConfig = {
-  name: '完全躺平',
-  icon: <Coffee size={14} />,
-  style: 'bg-stone-100 text-stone-600 ring-1 ring-stone-200 hover:bg-stone-200'
+  name: '彻底躺平',
+  icon: <Coffee size={15} strokeWidth={2.5} />,
+  colorClass: 'bg-stone-100 text-stone-600 border-stone-200',
+  shadowClass: 'shadow-stone-200'
 };
 
-const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WEEK_DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
 const TimeManagementCalendar = () => {
   // ==================== 状态管理 ====================
   const [currentDate, setCurrentDate] = useState(new Date());
-  
-  // 核心数据：存储每个月的具体安排 key: 'YYYY-MM-DD', value: CalendarDay
-  // 这里简化处理，为了演示方便，我们还是按月重置，但结构上支持扩展
   const [days, setDays] = useState<CalendarDay[]>([]);
   
-  // 拖拽中间态
+  // 拖拽相关状态
   const [dragType, setDragType] = useState<CardType | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null); // 当前鼠标悬停的格子索引
 
-  // 卡片配额
-  const QUOTA = { work: 7, rest: 4 }; // 7组努力卡，4张休息卡
+  const QUOTA = { work: 7, rest: 4 };
 
-  // ==================== 计算逻辑 (Derived State) ====================
+  // ==================== 核心逻辑 ====================
   
-  // 初始化/重新生成日历数据
   useMemo(() => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     
-    // 如果是切换月份，且该月还没有数据（这里简单处理为每次切换都重置，实际项目可从后端拉取）
-    // 为了保留当前操作，我们只在初始化时生成，后续通过 setDays 更新
-    if (days.length > 0 && days.some(d => d.fullDate?.startsWith(`${year}-${month}`))) {
-      return; 
-    }
+    // 简单起见，切换月份重置数据。实际项目应检查缓存。
+    if (days.length > 0 && days.some(d => d.fullDate?.startsWith(`${year}-${month}`))) return;
 
     const newDays: CalendarDay[] = [];
     const startWeekday = firstDay.getDay();
@@ -84,67 +83,88 @@ const TimeManagementCalendar = () => {
     for (let i = 0; i < startWeekday; i++) {
       newDays.push({ date: null, type: null });
     }
-    
-    // 填充实际日期
+    // 填充日期
     for (let d = 1; d <= lastDay.getDate(); d++) {
-      newDays.push({ 
-        date: d, 
-        fullDate: `${year}-${month}-${d}`,
-        type: null 
-      });
+      newDays.push({ date: d, fullDate: `${year}-${month}-${d}`, type: null });
     }
-    setDays(newDays);
-  }, [currentDate]); // 依赖 currentDate，但逻辑内部加了判断防止重置已编辑的数据
+    // 填充后置空白以补齐表格（可选，为了美观）
+    const remaining = 42 - newDays.length;
+    for(let i=0; i<remaining; i++) {
+       newDays.push({ date: null, type: null });
+    }
 
-  // 实时统计 (不再需要 useEffect 同步)
+    setDays(newDays);
+  }, [currentDate]);
+
+  // 实时统计
   const stats = useMemo(() => {
-    const workDays = days.filter(d => d.type === 'work').length;
-    const restDays = days.filter(d => d.type === 'rest').length;
     const totalDays = days.filter(d => d.date !== null).length;
-    
     const workGroups = new Set(days.filter(d => d.type === 'work').map(d => d.cardGroupId)).size;
     const restGroups = new Set(days.filter(d => d.type === 'rest').map(d => d.cardGroupId)).size;
 
     return { 
-      workDays, 
-      restDays, 
-      completion: totalDays > 0 ? Math.round(((workDays + restDays) / totalDays) * 100) : 0,
       usedWorkCards: workGroups,
-      usedRestCards: restGroups
+      usedRestCards: restGroups,
+      completion: totalDays > 0 ? Math.round(((workGroups * 3 + restGroups) / totalDays) * 100) : 0
     };
   }, [days]);
 
   // ==================== 交互逻辑 ====================
 
-  const handleMonthChange = (offset: number) => {
-    const newDate = new Date(currentDate);
-    newDate.setMonth(newDate.getMonth() + offset);
-    setCurrentDate(newDate);
-    setDays([]); // 切换月份清空当前视图数据（实际项目应保存）
-  };
-
   const handleDragStart = (e: React.DragEvent, type: CardType) => {
     setDragType(type);
     e.dataTransfer.effectAllowed = 'copy';
-    // 优化拖拽幽灵图
-    const el = e.currentTarget.cloneNode(true) as HTMLElement;
-    el.style.opacity = '1';
-    el.style.transform = 'scale(0.9) rotate(2deg)';
-    el.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
-    el.style.background = 'white';
-    el.style.width = '120px';
+    
+    // 创建更精致的拖拽幽灵图
+    const el = document.createElement('div');
+    el.className = `p-3 rounded-lg font-bold text-sm bg-white shadow-xl border-2 border-dashed ${type === 'work' ? 'border-indigo-300 text-indigo-500' : 'border-stone-300 text-stone-500'}`;
+    el.textContent = type === 'work' ? '✨ 3 Days Focus' : '💤 1 Day Rest';
+    el.style.position = 'absolute';
+    el.style.top = '-1000px';
     document.body.appendChild(el);
-    e.dataTransfer.setDragImage(el, 60, 20);
+    e.dataTransfer.setDragImage(el, 20, 20);
     setTimeout(() => document.body.removeChild(el), 0);
   };
 
-  const handleDrop = (index: number) => {
-    if (!dragType) return;
-    
-    const targetDay = days[index];
-    if (!targetDay.date) return;
+  // 计算卡片将会占据的索引位置（包含跨行逻辑）
+  const getTargetIndices = (startIndex: number, type: CardType) => {
+    const duration = type === 'work' ? 3 : 1;
+    const indices = [];
+    for (let i = 0; i < duration; i++) {
+      // 只要不超过数组长度且是有效日期格子，就允许（即使跨行）
+      const idx = startIndex + i;
+      if (idx < days.length && days[idx].date !== null) {
+        indices.push(idx);
+      } else {
+        return null; // 如果任何一部分超出范围或碰到空白格，则无效
+      }
+    }
+    return indices;
+  };
 
-    // 检查配额
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setHoverIndex(index);
+  };
+
+  const handleDrop = (index: number) => {
+    setHoverIndex(null);
+    if (!dragType) return;
+
+    const targetIndices = getTargetIndices(index, dragType);
+    
+    // 1. 基础有效性检查
+    if (!targetIndices || targetIndices.length !== (dragType === 'work' ? 3 : 1)) return;
+
+    // 2. 冲突检查：确保所有目标格子都是空的
+    const hasConflict = targetIndices.some(idx => days[idx].type !== null);
+    if (hasConflict) {
+      alert('这里已经有安排了，请换个位置');
+      return;
+    }
+
+    // 3. 配额检查
     if (dragType === 'work' && stats.usedWorkCards >= QUOTA.work) {
       alert('本月精力已耗尽，请适度休息');
       return;
@@ -154,38 +174,21 @@ const TimeManagementCalendar = () => {
       return;
     }
 
-    const duration = dragType === 'work' ? 3 : 1;
+    // 4. 执行放置
     const newDays = [...days];
     const groupId = Date.now();
+    const themeIdx = targetIndices[0] % 3; // 随机或轮询主题，这里简化
 
-    // 空间检查
-    let canPlace = true;
-    for (let i = 0; i < duration; i++) {
-      const checkIndex = index + i;
-      // 越界或已有安排
-      if (checkIndex >= newDays.length || !newDays[checkIndex].date || newDays[checkIndex].type) {
-        canPlace = false;
-        break;
-      }
-      // 连续卡片跨周检查 (Work卡片不能跨行显示，美观考虑)
-      if (dragType === 'work' && i > 0 && (index + i) % 7 === 0) {
-        canPlace = false;
-        break;
-      }
-    }
-
-    if (!canPlace) return; // 静默失败或轻微震动反馈
-
-    // 执行放置
-    for (let i = 0; i < duration; i++) {
-      const currentIdx = index + i;
-      newDays[currentIdx] = {
-        ...newDays[currentIdx],
+    targetIndices.forEach((idx, i) => {
+      newDays[idx] = {
+        ...newDays[idx],
         type: dragType,
         cardGroupId: groupId,
-        themeIndex: dragType === 'work' ? i : 0
+        themeIndex: dragType === 'work' ? i : 0, // 0, 1, 2 用于区分三天阶段
+        isStart: i === 0,
+        isEnd: i === targetIndices.length - 1
       };
-    }
+    });
 
     setDays(newDays);
     setDragType(null);
@@ -195,203 +198,239 @@ const TimeManagementCalendar = () => {
     setDays(days.map(d => d.cardGroupId === groupId ? { ...d, type: null, themeIndex: undefined, cardGroupId: undefined } : d));
   };
 
-  const resetCalendar = () => {
-    if (confirm('清空当前月份的所有计划？')) {
-      const newDays = days.map(d => ({ ...d, type: null, themeIndex: undefined, cardGroupId: undefined }));
-      setDays(newDays);
+  // ==================== 渲染辅助 ====================
+  
+  // 获取当前格子的视觉状态：'preview' | 'occupied' | 'empty'
+  const getCellState = (index: number) => {
+    // 1. 检查是否被实际占据
+    if (days[index].type) return { state: 'occupied', data: days[index] };
+    
+    // 2. 检查是否处于预览（悬停）状态
+    if (dragType && hoverIndex !== null) {
+      const previewIndices = getTargetIndices(hoverIndex, dragType);
+      if (previewIndices && previewIndices.includes(index)) {
+        // 检查预览是否有效（是否冲突）
+        const isValid = !previewIndices.some(i => days[i].type !== null);
+        // 计算预览时的相对位置 (0, 1, 2)
+        const relativeIndex = previewIndices.indexOf(index);
+        return { 
+          state: 'preview', 
+          isValid, 
+          previewType: dragType, 
+          relativeIndex 
+        };
+      }
     }
+    return { state: 'empty' };
   };
 
-  // ==================== 组件渲染 ====================
-
   return (
-    <div className="min-h-screen bg-[#F7F5F3] text-slate-700 font-sans selection:bg-indigo-100">
-      <div className="max-w-6xl mx-auto p-6 md:p-12">
+    <div className="min-h-screen bg-[#F4F2F0] text-slate-700 font-sans p-6 md:p-12 selection:bg-indigo-100">
+      <div className="max-w-5xl mx-auto">
         
-        {/* Header: 极简风格 */}
+        {/* Header */}
         <header className="flex flex-col md:flex-row justify-between items-end mb-10 gap-6">
           <div>
-            <h1 className="text-3xl font-serif text-slate-900 tracking-tight mb-2">
-              Rhythm of Life
-            </h1>
-            <p className="text-slate-500 text-sm max-w-md leading-relaxed">
-              三天打鱼，一天晒网。在专注与松弛之间寻找生活的节奏。
+            <h1 className="text-4xl font-serif text-slate-900 mb-3 tracking-tight">Rhythm of Life</h1>
+            <p className="text-slate-500 text-sm max-w-md">
+              三天打鱼，一天晒网。让时间管理像贴纸手账一样简单优雅。
             </p>
           </div>
           
-          <div className="flex items-center gap-6 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200/60">
-            <button onClick={() => handleMonthChange(-1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600">
+          <div className="flex items-center gap-6 bg-white px-6 py-3 rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.03)] border border-white">
+            <button onClick={() => setDays([])} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
               <ChevronLeft size={20} />
             </button>
-            <span className="text-lg font-medium font-mono text-slate-700 w-32 text-center">
-              {currentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' })}
-            </span>
-            <button onClick={() => handleMonthChange(1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600">
+            <div className="text-center px-2">
+              <div className="text-xs text-slate-400 uppercase tracking-wider font-bold">November</div>
+              <div className="text-xl font-serif text-slate-800">2025</div>
+            </div>
+            <button onClick={() => setDays([])} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
               <ChevronRight size={20} />
             </button>
           </div>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
-          {/* Left Sidebar: 工具箱 */}
-          <div className="lg:col-span-3 space-y-8">
+          {/* Sidebar: Palette */}
+          <div className="lg:col-span-3 space-y-6">
             
-            {/* 数据概览 - 纯文字风格 */}
-            <div className="bg-white p-6 rounded-2xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-slate-100">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6">Overview</h3>
-              <div className="space-y-5">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-slate-600">Focus Cycles</span>
-                    <span className="font-medium text-indigo-600">{stats.usedWorkCards}/{QUOTA.work}</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-indigo-400 rounded-full transition-all duration-500" style={{ width: `${(stats.usedWorkCards / QUOTA.work) * 100}%` }} />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-slate-600">Rest Days</span>
-                    <span className="font-medium text-stone-500">{stats.usedRestCards}/{QUOTA.rest}</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-stone-400 rounded-full transition-all duration-500" style={{ width: `${(stats.usedRestCards / QUOTA.rest) * 100}%` }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 拖拽源 */}
-            <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Plan Your Rhythm</h3>
-              
-              <div 
-                draggable={stats.usedWorkCards < QUOTA.work}
-                onDragStart={(e) => handleDragStart(e, 'work')}
-                className={`
-                  group bg-white p-4 rounded-xl border border-slate-200/60 shadow-sm cursor-grab active:cursor-grabbing
-                  hover:shadow-md hover:border-indigo-200 transition-all
-                  ${stats.usedWorkCards >= QUOTA.work ? 'opacity-50 grayscale pointer-events-none' : ''}
-                `}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-medium text-slate-800">Work Cycle</span>
-                  <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full">3 Days</span>
-                </div>
-                <div className="flex gap-1">
-                  {THEMES.map((t, i) => (
-                    <div key={i} className={`h-2 flex-1 rounded-full ${t.style.split(' ')[0].replace('bg-', 'bg-opacity-80 bg-')}`} />
-                  ))}
-                </div>
-                <div className="mt-3 text-xs text-slate-400 flex items-center gap-1">
-                   <GripHorizontal size={14} /> Drag to calendar
-                </div>
+            {/* Cards Palette */}
+            <div className="bg-white p-6 rounded-3xl shadow-[0_10px_30px_-10px_rgba(0,0,0,0.05)] border border-white/50">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">My Stickers</h3>
+                <button onClick={() => {if(confirm('重置本月？')) setDays([])}} className="text-slate-300 hover:text-red-400 transition-colors">
+                  <RotateCcw size={14} />
+                </button>
               </div>
 
-              <div 
-                draggable={stats.usedRestCards < QUOTA.rest}
-                onDragStart={(e) => handleDragStart(e, 'rest')}
-                className={`
-                  group bg-white p-4 rounded-xl border border-slate-200/60 shadow-sm cursor-grab active:cursor-grabbing
-                  hover:shadow-md hover:border-stone-200 transition-all
-                  ${stats.usedRestCards >= QUOTA.rest ? 'opacity-50 grayscale pointer-events-none' : ''}
-                `}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-slate-800">Rest Day</span>
-                  <span className="text-xs bg-stone-100 text-stone-600 px-2 py-1 rounded-full">1 Day</span>
+              <div className="space-y-4">
+                {/* Work Card Source */}
+                <div 
+                  draggable={stats.usedWorkCards < QUOTA.work}
+                  onDragStart={(e) => handleDragStart(e, 'work')}
+                  className={`
+                    group relative bg-white rounded-xl border-2 border-dashed border-indigo-100 p-4 cursor-grab active:cursor-grabbing transition-all duration-300
+                    hover:border-indigo-300 hover:shadow-lg hover:-translate-y-1
+                    ${stats.usedWorkCards >= QUOTA.work ? 'opacity-40 grayscale pointer-events-none' : ''}
+                  `}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2 text-indigo-900 font-medium">
+                      <div className="bg-indigo-100 p-1.5 rounded-md"><Briefcase size={14}/></div>
+                      Work Cycle
+                    </div>
+                    <span className="text-[10px] font-bold bg-indigo-50 text-indigo-400 px-2 py-1 rounded-full">3 DAYS</span>
+                  </div>
+                  <div className="flex gap-0.5 h-2 rounded-full overflow-hidden bg-slate-100">
+                    <div className="flex-1 bg-indigo-300"/>
+                    <div className="flex-1 bg-indigo-300/60"/>
+                    <div className="flex-1 bg-indigo-300/30"/>
+                  </div>
+                  <div className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full shadow-sm font-bold">
+                    {QUOTA.work - stats.usedWorkCards}
+                  </div>
                 </div>
-                 <div className="h-2 w-full rounded-full bg-stone-200" />
+
+                {/* Rest Card Source */}
+                <div 
+                  draggable={stats.usedRestCards < QUOTA.rest}
+                  onDragStart={(e) => handleDragStart(e, 'rest')}
+                  className={`
+                    group relative bg-white rounded-xl border-2 border-dashed border-stone-200 p-4 cursor-grab active:cursor-grabbing transition-all duration-300
+                    hover:border-stone-400 hover:shadow-lg hover:-translate-y-1
+                    ${stats.usedRestCards >= QUOTA.rest ? 'opacity-40 grayscale pointer-events-none' : ''}
+                  `}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 text-stone-700 font-medium">
+                      <div className="bg-stone-100 p-1.5 rounded-md"><Coffee size={14}/></div>
+                      Rest Day
+                    </div>
+                    <span className="text-[10px] font-bold bg-stone-100 text-stone-400 px-2 py-1 rounded-full">1 DAY</span>
+                  </div>
+                  <div className="absolute -top-2 -right-2 bg-stone-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full shadow-sm font-bold">
+                    {QUOTA.rest - stats.usedRestCards}
+                  </div>
+                </div>
               </div>
               
-              <button 
-                onClick={resetCalendar}
-                className="w-full py-2 text-xs text-slate-400 hover:text-red-500 transition-colors flex items-center justify-center gap-2"
-              >
-                <RotateCcw size={12} /> Reset Month
-              </button>
+              <div className="mt-8 pt-6 border-t border-slate-100">
+                <div className="flex justify-between text-xs text-slate-400 mb-2">
+                  <span>Monthly Balance</span>
+                  <span>{stats.completion}%</span>
+                </div>
+                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-slate-800 rounded-full transition-all duration-1000 ease-out" style={{ width: `${stats.completion}%` }} />
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Right: Calendar Grid */}
+          {/* Main Calendar */}
           <div className="lg:col-span-9">
-            <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-slate-100 p-8">
+            <div className="bg-white rounded-[2rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.1)] border border-white/50 p-8 md:p-10 select-none">
               
-              {/* Weekday Headers */}
-              <div className="grid grid-cols-7 mb-4">
+              {/* Week Headers */}
+              <div className="grid grid-cols-7 mb-6">
                 {WEEK_DAYS.map(day => (
-                  <div key={day} className="text-center text-xs font-medium text-slate-400 uppercase tracking-widest py-2">
+                  <div key={day} className="text-center text-[10px] font-bold text-slate-300 tracking-widest">
                     {day}
                   </div>
                 ))}
               </div>
 
-              {/* Days Grid */}
-              <div className="grid grid-cols-7 grid-rows-5 gap-3 min-h-[500px]">
+              {/* Grid */}
+              <div className="grid grid-cols-7 gap-3 lg:gap-4">
                 {days.map((day, index) => {
-                  // 样式逻辑处理
-                  const isWork = day.type === 'work';
-                  const isRest = day.type === 'rest';
-                  const theme = isWork && day.themeIndex !== undefined ? THEMES[day.themeIndex] : REST_THEME;
+                  const { state, data, previewType, relativeIndex, isValid } = getCellState(index);
                   
-                  // 连续卡片的视觉连接处理
-                  let roundedClass = 'rounded-2xl';
-                  if (isWork) {
-                     if (day.themeIndex === 0) roundedClass = 'rounded-l-2xl rounded-r-md';
-                     else if (day.themeIndex === 1) roundedClass = 'rounded-md';
-                     else if (day.themeIndex === 2) roundedClass = 'rounded-r-2xl rounded-l-md';
+                  // 样式计算
+                  let cellContent = null;
+                  let cellStyle = "bg-transparent"; // 默认透明
+                  
+                  if (state === 'occupied' && data) {
+                    const isWork = data.type === 'work';
+                    const theme = isWork && data.themeIndex !== undefined ? THEMES[data.themeIndex] : REST_THEME;
+                    
+                    // 核心：判断是否在视觉上是"一组"的开头或结尾
+                    // 如果是周日(index % 7 === 0)，无论逻辑上是否是开头，视觉上都必须是圆角开头
+                    // 如果是周六(index % 7 === 6)，视觉上必须是圆角结尾
+                    const isVisualStart = data.isStart || index % 7 === 0;
+                    const isVisualEnd = data.isEnd || index % 7 === 6;
+
+                    const roundClass = `
+                      ${isVisualStart ? 'rounded-l-xl' : 'rounded-l-none border-l-0'} 
+                      ${isVisualEnd ? 'rounded-r-xl' : 'rounded-r-none border-r-0'}
+                    `;
+
+                    cellStyle = `
+                      ${theme.colorClass} border border-solid ${roundClass}
+                      ${theme.shadowClass} shadow-sm
+                      transform transition-all duration-300
+                    `;
+
+                    cellContent = (
+                      <div className="flex flex-col items-center justify-center h-full w-full animate-in fade-in zoom-in duration-300">
+                        {/* 如果被切断了，且不是逻辑上的第一天，就不显示图标，只显示颜色块保持连接感 */}
+                        {(isVisualStart || data.isStart) && (
+                          <div className="scale-90 opacity-90">{theme.icon}</div>
+                        )}
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); data.cardGroupId && handleRemove(data.cardGroupId); }}
+                          className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                           <span className="block w-1.5 h-1.5 bg-current rounded-full opacity-40 hover:opacity-100" />
+                        </button>
+                      </div>
+                    );
+                  } else if (state === 'preview' && relativeIndex !== undefined) {
+                    // 预览状态样式
+                    const isWork = previewType === 'work';
+                    const theme = isWork ? THEMES[relativeIndex] : REST_THEME;
+                    
+                    // 同样的视觉断行逻辑
+                    const isVisualStart = relativeIndex === 0 || index % 7 === 0;
+                    const isVisualEnd = relativeIndex === (isWork ? 2 : 0) || index % 7 === 6;
+                    const roundClass = `${isVisualStart ? 'rounded-l-xl' : 'rounded-l-none'} ${isVisualEnd ? 'rounded-r-xl' : 'rounded-r-none'}`;
+
+                    cellStyle = `
+                      ${isValid ? theme.colorClass : 'bg-red-50 border-red-200'} 
+                      border-2 border-dashed ${roundClass} opacity-60 scale-95
+                    `;
+                  } else if (day.date) {
+                    // 空白格子样式
+                    cellStyle = "bg-slate-50/50 rounded-xl border border-transparent hover:bg-slate-100 hover:border-slate-200 transition-colors";
                   }
 
                   return (
                     <div
                       key={index}
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                      onDragOver={(e) => handleDragOver(e, index)}
                       onDrop={() => handleDrop(index)}
                       className={`
-                        relative flex flex-col items-start justify-between p-3 transition-all duration-200
-                        ${!day.date ? 'invisible' : 'visible'}
-                        ${day.type 
-                          ? `${theme.style} ${roundedClass} shadow-sm` 
-                          : 'bg-slate-50/50 border border-transparent hover:border-slate-200 hover:bg-slate-50 rounded-2xl'
-                        }
+                        aspect-square relative group flex items-center justify-center
+                        ${!day.date ? 'invisible' : ''}
                       `}
                     >
-                      {/* Date Number */}
+                      {/* 背景层（卡片本身） */}
+                      <div className={`absolute inset-0 ${cellStyle}`} />
+
+                      {/* 日期数字 (始终显示，层级最高) */}
                       {day.date && (
                         <span className={`
-                          text-sm font-medium 
-                          ${day.type ? 'opacity-100' : 'text-slate-400'}
+                          absolute top-2 left-3 text-xs font-bold z-10 pointer-events-none
+                          ${state === 'occupied' ? 'text-current opacity-70' : 'text-slate-300'}
                         `}>
                           {day.date}
                         </span>
                       )}
 
-                      {/* Card Content */}
-                      {day.type && (
-                        <div className="mt-2 w-full">
-                          <div className="flex flex-col items-center justify-center py-2 gap-1">
-                            {theme.icon}
-                            <span className="text-[10px] font-medium tracking-wide opacity-90">
-                              {theme.name}
-                            </span>
-                          </div>
-                          
-                          {/* Delete Button (Hover) */}
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); day.cardGroupId && handleRemove(day.cardGroupId); }}
-                            className="absolute top-1 right-1 p-1 opacity-0 group-hover:opacity-100 hover:bg-black/5 rounded-full transition-opacity"
-                          >
-                            <span className="sr-only">Remove</span>
-                            <div className="w-1.5 h-1.5 bg-current rounded-full opacity-50" />
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Drag Indicator */}
-                      {!day.type && dragType && (
-                         <div className="absolute inset-0 border-2 border-indigo-200 border-dashed rounded-2xl pointer-events-none opacity-0 hover:opacity-100 transition-opacity bg-indigo-50/10" />
-                      )}
+                      {/* 内容层 */}
+                      <div className="relative z-10 w-full h-full pointer-events-none">
+                        {cellContent}
+                      </div>
                     </div>
                   );
                 })}
