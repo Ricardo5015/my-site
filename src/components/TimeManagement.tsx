@@ -1,608 +1,407 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar, Target, Sparkles, RotateCcw, Coffee, GripVertical } from 'lucide-react';
-/**
- * 时间管理日历组件 - "三天打鱼，一天晒网"规划工具
- * 
- * 功能说明：
- * 1. 拖拽卡片到日历上规划时间
- * 2. 努力生活卡：连续3天，每天不同主题
- * 3. 无敌摆烂卡：仅1天，用于休息
- * 4. 支持月度切换和重置
- */
+import React, { useState, useMemo } from 'react';
+import { ChevronLeft, ChevronRight, RotateCcw, Briefcase, Palette, Heart, Coffee, GripHorizontal } from 'lucide-react';
+
+// ==================== 类型定义 ====================
+type CardType = 'work' | 'rest';
+
+interface ThemeConfig {
+  name: string;
+  icon: React.ReactNode;
+  // 优雅的配色方案：bg-背景色, text-文字色, ring-边框色
+  style: string;
+}
+
+interface CalendarDay {
+  date: number | null; // null 代表空白填充格
+  fullDate?: string;   // 完整日期字符串用于唯一标识
+  type: CardType | null;
+  themeIndex?: number; // 0, 1, 2 对应三天打鱼的不同阶段
+  cardGroupId?: number; // 同一组卡片的唯一标识
+}
+
+// ==================== 静态配置 ====================
+
+// 莫兰迪/Notion 风格配色
+const THEMES: ThemeConfig[] = [
+  { 
+    name: '深度工作', 
+    icon: <Briefcase size={14} />, 
+    style: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200/50 hover:bg-indigo-100' 
+  },
+  { 
+    name: '创造探索', 
+    icon: <Palette size={14} />, 
+    style: 'bg-purple-50 text-purple-700 ring-1 ring-purple-200/50 hover:bg-purple-100' 
+  },
+  { 
+    name: '身心复原', 
+    icon: <Heart size={14} />, 
+    style: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/50 hover:bg-emerald-100' 
+  }
+];
+
+const REST_THEME: ThemeConfig = {
+  name: '完全躺平',
+  icon: <Coffee size={14} />,
+  style: 'bg-stone-100 text-stone-600 ring-1 ring-stone-200 hover:bg-stone-200'
+};
+
+const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 const TimeManagementCalendar = () => {
   // ==================== 状态管理 ====================
-  /**
-   * 当前显示的月份
-   * 用于控制日历显示哪个月的日期
-   */
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  /**
-   * 主题配置数组
-   * 每个努力生活卡连续3天会依次使用这些主题
-   */
-  const [themes] = useState([
-    { name: '职业发展', color: 'from-blue-500 to-blue-600', icon: '💼', borderColor: 'border-blue-400' },
-    { name: '兴趣爱好', color: 'from-purple-500 to-purple-600', icon: '🎨', borderColor: 'border-purple-400' },
-    { name: '身心健康', color: 'from-green-500 to-green-600', icon: '💪', borderColor: 'border-green-400' }
-  ]);
-  /**
-   * 日历天数数组
-   * 每个元素代表一个日期格子，包含：
-   * - date: 日期数字（null表示空白格子）
-   * - type: 'work' | 'rest' | null（卡片类型）
-   * - themes: 主题索引数组（努力卡使用）
-   * - cardId: 卡片唯一标识（用于删除整张卡片）
-   */
-  const [calendarDays, setCalendarDays] = useState<any[]>([]);
-  /**
-   * 统计数据
-   * - work: 工作天数
-   * - rest: 休息天数  
-   * - total: 总天数
-   */
-  const [stats, setStats] = useState({ work: 0, rest: 0, total: 0 });
-  /**
-   * 拖拽相关状态
-   */
-  const [draggedCard, setDraggedCard] = useState<number | null>(null); // 正在拖拽的卡片索引
-  const [draggedCardType, setDraggedCardType] = useState<'work' | 'rest' | null>(null); // 拖拽的卡片类型
-  /**
-   * 卡片配置常量
-   */
-  const [availableWorkCards] = useState(7); // 总共可用的努力卡数量
-  const [availableRestCards] = useState(3); // 总共可用的摆烂卡数量
-  const [usedWorkCards, setUsedWorkCards] = useState(0); // 已使用的努力卡数量
-  const [usedRestCards, setUsedRestCards] = useState(0); // 已使用的摆烂卡数量
-  /**
-   * 庆祝动画显示控制
-   * 拖拽成功后显示emoji动画
-   */
-  const [showCelebration, setShowCelebration] = useState(false);
-  // ==================== 生命周期钩子 ====================
-  /**
-   * 组件初始化和月份切换时重新生成日历
-   * 依赖项：currentMonth（当月份变化时重新生成日历）
-   */
-  useEffect(() => {
-    generateCalendar();
-  }, [currentMonth]);
-  // ==================== 日历生成函数 ====================
-  /**
-   * 生成当前月份的日历数据
-   * 包括：
-   * 1. 计算月份第一天是周几
-   * 2. 计算月份有多少天
-   * 3. 在开头填充空白格子
-   * 4. 生成日期格子数组
-   */
-  const generateCalendar = () => {
-    const year = currentMonth.getFullYear();
-    const month = currentMonth.getMonth();
-    // 获取月份第一天（用于计算是周几）
+  const [currentDate, setCurrentDate] = useState(new Date());
+  
+  // 核心数据：存储每个月的具体安排 key: 'YYYY-MM-DD', value: CalendarDay
+  // 这里简化处理，为了演示方便，我们还是按月重置，但结构上支持扩展
+  const [days, setDays] = useState<CalendarDay[]>([]);
+  
+  // 拖拽中间态
+  const [dragType, setDragType] = useState<CardType | null>(null);
+
+  // 卡片配额
+  const QUOTA = { work: 7, rest: 4 }; // 7组努力卡，4张休息卡
+
+  // ==================== 计算逻辑 (Derived State) ====================
+  
+  // 初始化/重新生成日历数据
+  useMemo(() => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
     const firstDay = new Date(year, month, 1);
-    // 获取月份最后一天（用于计算天数）
     const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    // 第一天是周几（0=周日，1=周一...）
+    
+    // 如果是切换月份，且该月还没有数据（这里简单处理为每次切换都重置，实际项目可从后端拉取）
+    // 为了保留当前操作，我们只在初始化时生成，后续通过 setDays 更新
+    if (days.length > 0 && days.some(d => d.fullDate?.startsWith(`${year}-${month}`))) {
+      return; 
+    }
+
+    const newDays: CalendarDay[] = [];
     const startWeekday = firstDay.getDay();
-    const days = [];
-    // 在日历开头填充空白格子（对齐星期）
+    
+    // 填充前置空白
     for (let i = 0; i < startWeekday; i++) {
-      days.push({ date: null, type: null, themes: [], cardId: null });
+      newDays.push({ date: null, type: null });
     }
-    // 生成该月的所有日期格子
-    for (let date = 1; date <= daysInMonth; date++) {
-      days.push({ date, type: null, themes: [], cardId: null });
+    
+    // 填充实际日期
+    for (let d = 1; d <= lastDay.getDate(); d++) {
+      newDays.push({ 
+        date: d, 
+        fullDate: `${year}-${month}-${d}`,
+        type: null 
+      });
     }
-    // 更新状态并计算统计信息
-    setCalendarDays(days);
-    updateStats(days);
+    setDays(newDays);
+  }, [currentDate]); // 依赖 currentDate，但逻辑内部加了判断防止重置已编辑的数据
+
+  // 实时统计 (不再需要 useEffect 同步)
+  const stats = useMemo(() => {
+    const workDays = days.filter(d => d.type === 'work').length;
+    const restDays = days.filter(d => d.type === 'rest').length;
+    const totalDays = days.filter(d => d.date !== null).length;
+    
+    const workGroups = new Set(days.filter(d => d.type === 'work').map(d => d.cardGroupId)).size;
+    const restGroups = new Set(days.filter(d => d.type === 'rest').map(d => d.cardGroupId)).size;
+
+    return { 
+      workDays, 
+      restDays, 
+      completion: totalDays > 0 ? Math.round(((workDays + restDays) / totalDays) * 100) : 0,
+      usedWorkCards: workGroups,
+      usedRestCards: restGroups
+    };
+  }, [days]);
+
+  // ==================== 交互逻辑 ====================
+
+  const handleMonthChange = (offset: number) => {
+    const newDate = new Date(currentDate);
+    newDate.setMonth(newDate.getMonth() + offset);
+    setCurrentDate(newDate);
+    setDays([]); // 切换月份清空当前视图数据（实际项目应保存）
   };
-  /**
-   * 更新统计数据
-   * @param days 日历天数数组
-   * 计算工作天数、休息天数、已使用卡片数量等
-   */
-  const updateStats = (days: any[]) => {
-    // 统计工作天数（type为'work'的格子数量）
-    const workDays = days.filter(d => d.date && d.type === 'work').length;
-    // 统计休息天数（type为'rest'的格子数量）
-    const restDays = days.filter(d => d.date && d.type === 'rest').length;
-    // 统计总天数（有日期的格子数量）
-    const total = days.filter(d => d.date).length;
-    // 使用Set去重，统计实际使用的卡片数量（一张卡片可能占据多个格子）
-    const workCardsUsed = new Set(days.filter(d => d.cardId !== null && d.type === 'work').map(d => d.cardId)).size;
-    const restCardsUsed = new Set(days.filter(d => d.cardId !== null && d.type === 'rest').map(d => d.cardId)).size;
-    // 更新已使用卡片数量
-    setUsedWorkCards(workCardsUsed);
-    setUsedRestCards(restCardsUsed);
-    // 更新统计数据
-    setStats({ work: workDays, rest: restDays, total });
-  };
-  // ==================== 月份控制函数 ====================
-  /**
-   * 切换月份
-   * @param direction 方向：-1上个月，+1下个月
-   */
-  const changeMonth = (direction: number) => {
-    const newDate = new Date(currentMonth);
-    newDate.setMonth(newDate.getMonth() + direction);
-    setCurrentMonth(newDate);
-  };
-  // ==================== 拖拽处理函数 ====================
-  /**
-   * 开始拖拽时的处理
-   * @param e 拖拽事件
-   * @param cardIndex 卡片索引
-   * @param cardType 卡片类型
-   * 
-   * 功能：
-   * 1. 设置拖拽状态
-   * 2. 创建拖拽时的视觉反馈（半透明副本）
-   * 3. 设置拖拽数据
-   */
-  const handleDragStart = (e: React.DragEvent, cardIndex: number, cardType: 'work' | 'rest') => {
-    // 记录正在拖拽的卡片信息
-    setDraggedCard(cardIndex);
-    setDraggedCardType(cardType);
-    // 设置拖拽效果
+
+  const handleDragStart = (e: React.DragEvent, type: CardType) => {
+    setDragType(type);
     e.dataTransfer.effectAllowed = 'copy';
-    // 创建拖拽时的视觉反馈（一个半透明的副本）
-    const dragImage = e.currentTarget.cloneNode(true) as HTMLElement;
-    dragImage.style.opacity = '0.8';
-    dragImage.style.transform = 'scale(0.9)';
-    dragImage.style.position = 'absolute';
-    dragImage.style.top = '-1000px';
-    document.body.appendChild(dragImage);
-    // 设置拖拽时显示的图像
-    e.dataTransfer.setDragImage(dragImage, 20, 20);
-    // 清理临时元素
-    setTimeout(() => {
-      if (document.body.contains(dragImage)) {
-        document.body.removeChild(dragImage);
-      }
-    }, 0);
+    // 优化拖拽幽灵图
+    const el = e.currentTarget.cloneNode(true) as HTMLElement;
+    el.style.opacity = '1';
+    el.style.transform = 'scale(0.9) rotate(2deg)';
+    el.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.1)';
+    el.style.background = 'white';
+    el.style.width = '120px';
+    document.body.appendChild(el);
+    e.dataTransfer.setDragImage(el, 60, 20);
+    setTimeout(() => document.body.removeChild(el), 0);
   };
-  /**
-   * 拖拽经过时的处理
-   * @param e 拖拽事件
-   * 
-   * 功能：允许在此处放置
-   */
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-  };
-  /**
-   * 放置卡片时的处理
-   * @param e 拖拽事件
-   * @param startIndex 放置起始位置的索引
-   * 
-   * 功能：
-   * 1. 验证是否可以放置
-   * 2. 检查卡片数量限制
-   * 3. 检查连续天数的可用性
-   * 4. 执行放置操作
-   * 5. 更新状态和统计
-   */
-  const handleDrop = (e: React.DragEvent, startIndex: number) => {
-    e.preventDefault();
-    // 如果没有正在拖拽的卡片，直接返回
-    if (draggedCard === null || draggedCardType === null) return;
-    // 获取目标日期格子
-    const day = calendarDays[startIndex];
-    if (!day.date) return; // 空白格子不能放置
-    const newDays = [...calendarDays];
-    const cardId = Date.now(); // 生成唯一ID
-    const cardLength = draggedCardType === 'work' ? 3 : 1; // 🔥 修改：摆烂卡现在只占据1天
-    // 检查是否还有可用卡片
-    if (draggedCardType === 'work' && usedWorkCards >= availableWorkCards) {
-      alert('努力生活卡已经用完啦！🎴');
-      resetDrag();
+
+  const handleDrop = (index: number) => {
+    if (!dragType) return;
+    
+    const targetDay = days[index];
+    if (!targetDay.date) return;
+
+    // 检查配额
+    if (dragType === 'work' && stats.usedWorkCards >= QUOTA.work) {
+      alert('本月精力已耗尽，请适度休息');
       return;
     }
-    if (draggedCardType === 'rest' && usedRestCards >= availableRestCards) {
-      alert('无敌摆烂卡已经用完啦！😴');
-      resetDrag();
+    if (dragType === 'rest' && stats.usedRestCards >= QUOTA.rest) {
+      alert('摆烂额度已用完，起来干活！');
       return;
     }
-    // 检查是否能放置连续的天数
+
+    const duration = dragType === 'work' ? 3 : 1;
+    const newDays = [...days];
+    const groupId = Date.now();
+
+    // 空间检查
     let canPlace = true;
-    for (let i = 0; i < cardLength; i++) {
-      const targetIndex = startIndex + i;
-      // 超出日历范围
-      if (targetIndex >= newDays.length || !newDays[targetIndex].date) {
+    for (let i = 0; i < duration; i++) {
+      const checkIndex = index + i;
+      // 越界或已有安排
+      if (checkIndex >= newDays.length || !newDays[checkIndex].date || newDays[checkIndex].type) {
         canPlace = false;
         break;
       }
-      // 🔥 修改：摆烂卡只有1天，不需要检查跨周
-      if (i > 0 && (startIndex + i) % 7 === 0) {
+      // 连续卡片跨周检查 (Work卡片不能跨行显示，美观考虑)
+      if (dragType === 'work' && i > 0 && (index + i) % 7 === 0) {
         canPlace = false;
         break;
       }
     }
-    if (!canPlace) {
-      alert(`这里放不下完整的${cardLength}天卡片哦！请选择其他位置 🗓️`);
-      resetDrag();
-      return;
+
+    if (!canPlace) return; // 静默失败或轻微震动反馈
+
+    // 执行放置
+    for (let i = 0; i < duration; i++) {
+      const currentIdx = index + i;
+      newDays[currentIdx] = {
+        ...newDays[currentIdx],
+        type: dragType,
+        cardGroupId: groupId,
+        themeIndex: dragType === 'work' ? i : 0
+      };
     }
-    // 执行放置操作
-    if (draggedCardType === 'work') {
-      // 放置努力生活卡（连续3天，每天不同主题）
-      for (let i = 0; i < 3; i++) {
-        const targetIndex = startIndex + i;
-        newDays[targetIndex].themes = [i]; // 使用第i个主题
-        newDays[targetIndex].cardId = cardId; // 设置卡片ID
-        newDays[targetIndex].type = 'work'; // 设置类型
-      }
-    } else {
-      // 🔥 修改：放置无敌摆烂卡（仅1天）
-      newDays[startIndex].themes = []; // 摆烂卡没有主题
-      newDays[startIndex].cardId = cardId; // 设置卡片ID
-      newDays[startIndex].type = 'rest'; // 设置类型
-    }
-    // 更新状态
-    setCalendarDays(newDays);
-    updateStats(newDays);
-    resetDrag(); // 重置拖拽状态
-    // 显示庆祝动画
-    setShowCelebration(true);
-    setTimeout(() => setShowCelebration(false), 1500);
+
+    setDays(newDays);
+    setDragType(null);
   };
-  /**
-   * 重置拖拽状态
-   * 清空拖拽相关的状态变量
-   */
-  const resetDrag = () => {
-    setDraggedCard(null);
-    setDraggedCardType(null);
+
+  const handleRemove = (groupId: number) => {
+    setDays(days.map(d => d.cardGroupId === groupId ? { ...d, type: null, themeIndex: undefined, cardGroupId: undefined } : d));
   };
-  // ==================== 卡片操作函数 ====================
-  /**
-   * 移除已放置的卡片
-   * @param cardId 要移除的卡片ID
-   * 
-   * 功能：根据cardId找到所有相关格子并清空
-   */
-  const removeCard = (cardId: number) => {
-    const newDays = calendarDays.map(day => {
-      // 如果格子的cardId匹配，则清空该格子
-      if (day.cardId === cardId) {
-        return { ...day, themes: [], cardId: null, type: null };
-      }
-      return day;
-    });
-    // 更新状态
-    setCalendarDays(newDays);
-    updateStats(newDays);
-  };
-  /**
-   * 重置整个日历
-   * 清空所有已放置的卡片，恢复到初始状态
-   */
+
   const resetCalendar = () => {
-    if (confirm('确定要重置本月的所有安排吗？')) {
-      generateCalendar();
+    if (confirm('清空当前月份的所有计划？')) {
+      const newDays = days.map(d => ({ ...d, type: null, themeIndex: undefined, cardGroupId: undefined }));
+      setDays(newDays);
     }
   };
-  // ==================== 数据计算 ====================
-  // 星期标题数组
-  const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
-  /**
-   * 获取所有已使用的卡片ID列表
-   * 使用Set去重，确保每张卡片只出现一次
-   */
-  const usedWorkCardIds = [...new Set(
-    calendarDays
-      .filter(d => d.cardId !== null && d.type === 'work')
-      .map(d => d.cardId)
-  )];
-  const usedRestCardIds = [...new Set(
-    calendarDays
-      .filter(d => d.cardId !== null && d.type === 'rest')
-      .map(d => d.cardId)
-  )];
-  // ==================== JSX渲染 ====================
+
+  // ==================== 组件渲染 ====================
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
-      <div className="max-w-7xl mx-auto">
-        {/* 标题区域 */}
-        <div className="text-center mb-6">
-          <h1 className="text-3xl md:text-4xl font-bold text-white mb-2 flex items-center justify-center gap-2">
-            <Sparkles className="w-6 h-6 text-yellow-300 animate-pulse" />
-            三天打鱼，一天晒网
-            <Sparkles className="w-6 h-6 text-yellow-300 animate-pulse" />
-          </h1>
-          <p className="text-gray-300 text-sm">拖拽卡片来规划你的努力生活 🎴</p>
-        </div>
-        {/* 主布局：左侧卡片 + 右侧日历 */}
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* 左侧：控制面板 */}
-          <div className="lg:w-80 space-y-4">
-            {/* 统计信息面板 */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white/10 backdrop-blur-lg rounded-lg p-3 border border-white/20">
-                <div className="text-blue-300 text-xs mb-1">努力卡片</div>
-                <div className="text-xl font-bold text-white">{usedWorkCards} / {availableWorkCards}</div>
-              </div>
-              <div className="bg-white/10 backdrop-blur-lg rounded-lg p-3 border border-white/20">
-                <div className="text-pink-300 text-xs mb-1">摆烂卡片</div>
-                <div className="text-xl font-bold text-white">{usedRestCards} / {availableRestCards}</div>
-              </div>
-            </div>
-            {/* 努力生活卡面板 */}
-            <div className="bg-white/10 backdrop-blur-lg rounded-lg p-4 border border-white/20">
-              <div className="text-white font-bold mb-3 flex items-center gap-2 text-sm">
-                🎴 努力生活卡
-                <span className="text-xs bg-blue-500/30 px-2 py-0.5 rounded">
-                  连续3天
-                </span>
-              </div>
-              {/* 努力生活卡网格 */}
-              <div className="grid grid-cols-4 gap-2 mb-3">
-                {[...Array(availableWorkCards)].map((_, index) => {
-                  const isUsed = index < usedWorkCards; // 判断该卡片是否已使用
-                  return (
-                    <div
-                      key={index}
-                      draggable={!isUsed} // 已使用的卡片不能拖拽
-                      onDragStart={(e) => !isUsed && handleDragStart(e, index, 'work')}
-                      className={`
-                        relative group cursor-grab active:cursor-grabbing
-                        ${isUsed ? 'opacity-30 cursor-not-allowed' : ''}
-                      `}
-                    >
-                      <div className={`
-                        bg-gradient-to-br from-amber-400 via-orange-500 to-red-500
-                        rounded p-2 border border-amber-300
-                        shadow transition-all duration-300
-                        ${!isUsed ? 'hover:scale-105 hover:shadow-lg' : ''}
-                      `}>
-                        <div className="text-center">
-                          {/* 卡片编号 */}
-                          <span className="text-white font-bold text-xs">#{index + 1}</span>
-                          {isUsed && <div className="text-[8px] text-white/80">已用</div>}
-                        </div>
-                        {/* 未使用时显示主题图标 */}
-                        {!isUsed && (
-                          <div className="mt-1 space-y-0.5">
-                            {themes.slice(0, 3).map((theme, i) => (
-                              <div key={i} className="text-center">
-                                <span className="text-xs">{theme.icon}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {/* 已使用的努力卡列表 */}
-              {usedWorkCardIds.length > 0 && (
-                <div className="pt-3 border-t border-white/10">
-                  <div className="text-white text-xs mb-2">已使用：</div>
-                  <div className="flex flex-wrap gap-1">
-                    {usedWorkCardIds.map((cardId, index) => (
-                      <button
-                        key={cardId}
-                        onClick={() => removeCard(cardId as number)}
-                        className="bg-red-500/20 hover:bg-red-500/30 border border-red-400/50 px-2 py-1 rounded text-white text-xs transition-all"
-                      >
-                        #{index + 1} ×
-                      </button>
-                    ))}
+    <div className="min-h-screen bg-[#F7F5F3] text-slate-700 font-sans selection:bg-indigo-100">
+      <div className="max-w-6xl mx-auto p-6 md:p-12">
+        
+        {/* Header: 极简风格 */}
+        <header className="flex flex-col md:flex-row justify-between items-end mb-10 gap-6">
+          <div>
+            <h1 className="text-3xl font-serif text-slate-900 tracking-tight mb-2">
+              Rhythm of Life
+            </h1>
+            <p className="text-slate-500 text-sm max-w-md leading-relaxed">
+              三天打鱼，一天晒网。在专注与松弛之间寻找生活的节奏。
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-6 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200/60">
+            <button onClick={() => handleMonthChange(-1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600">
+              <ChevronLeft size={20} />
+            </button>
+            <span className="text-lg font-medium font-mono text-slate-700 w-32 text-center">
+              {currentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' })}
+            </span>
+            <button onClick={() => handleMonthChange(1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600">
+              <ChevronRight size={20} />
+            </button>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+          
+          {/* Left Sidebar: 工具箱 */}
+          <div className="lg:col-span-3 space-y-8">
+            
+            {/* 数据概览 - 纯文字风格 */}
+            <div className="bg-white p-6 rounded-2xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-slate-100">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6">Overview</h3>
+              <div className="space-y-5">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-slate-600">Focus Cycles</span>
+                    <span className="font-medium text-indigo-600">{stats.usedWorkCards}/{QUOTA.work}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-400 rounded-full transition-all duration-500" style={{ width: `${(stats.usedWorkCards / QUOTA.work) * 100}%` }} />
                   </div>
                 </div>
-              )}
-            </div>
-            {/* 无敌摆烂卡面板 */}
-            <div className="bg-white/10 backdrop-blur-lg rounded-lg p-4 border border-white/20">
-              <div className="text-white font-bold mb-3 flex items-center gap-2 text-sm">
-                😴 无敌摆烂卡
-                <span className="text-xs bg-pink-500/30 px-2 py-0.5 rounded">
-                  🔥 1天
-                </span>
-              </div>
-              {/* 摆烂卡网格 */}
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                {[...Array(availableRestCards)].map((_, index) => {
-                  const isUsed = index < usedRestCards; // 判断该卡片是否已使用
-                  return (
-                    <div
-                      key={index}
-                      draggable={!isUsed} // 已使用的卡片不能拖拽
-                      onDragStart={(e) => !isUsed && handleDragStart(e, index, 'rest')}
-                      className={`
-                        relative group cursor-grab active:cursor-grabbing
-                        ${isUsed ? 'opacity-30 cursor-not-allowed' : ''}
-                      `}
-                    >
-                      <div className={`
-                        bg-gradient-to-br from-pink-400 via-rose-400 to-red-400
-                        rounded p-3 border border-pink-300
-                        shadow transition-all duration-300
-                        ${!isUsed ? 'hover:scale-105 hover:shadow-lg' : ''}
-                      `}>
-                        <div className="text-center">
-                          {/* 卡片编号 */}
-                          <span className="text-white font-bold text-xs">#{index + 1}</span>
-                          {isUsed && <div className="text-[8px] text-white/80">已用</div>}
-                        </div>
-                        {/* 未使用时显示摆烂图标 */}
-                        {!isUsed && (
-                          <div className="mt-1 text-center">
-                            <span className="text-lg">😴</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {/* 已使用的摆烂卡列表 */}
-              {usedRestCardIds.length > 0 && (
-                <div className="pt-3 border-t border-white/10">
-                  <div className="text-white text-xs mb-2">已使用：</div>
-                  <div className="flex flex-wrap gap-1">
-                    {usedRestCardIds.map((cardId, index) => (
-                      <button
-                        key={cardId}
-                        onClick={() => removeCard(cardId as number)}
-                        className="bg-red-500/20 hover:bg-red-500/30 border border-red-400/50 px-2 py-1 rounded text-white text-xs transition-all"
-                      >
-                        #{index + 1} ×
-                      </button>
-                    ))}
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-slate-600">Rest Days</span>
+                    <span className="font-medium text-stone-500">{stats.usedRestCards}/{QUOTA.rest}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-stone-400 rounded-full transition-all duration-500" style={{ width: `${(stats.usedRestCards / QUOTA.rest) * 100}%` }} />
                   </div>
                 </div>
-              )}
-            </div>
-            {/* 使用说明面板 */}
-            <div className="bg-gradient-to-r from-yellow-500/10 to-orange-500/10 backdrop-blur-lg rounded-lg p-3 border border-yellow-500/30">
-              <div className="text-yellow-300 font-semibold mb-2 flex items-center gap-2 text-sm">
-                💡 使用说明
               </div>
-              <ul className="text-yellow-200 text-xs space-y-1">
-                <li>• 拖拽卡片到日历进行规划</li>
-                <li>• 🔥 努力卡3天，摆烂卡1天</li>
-                <li>• 点击"已使用"可移除卡片</li>
-              </ul>
+            </div>
+
+            {/* 拖拽源 */}
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Plan Your Rhythm</h3>
+              
+              <div 
+                draggable={stats.usedWorkCards < QUOTA.work}
+                onDragStart={(e) => handleDragStart(e, 'work')}
+                className={`
+                  group bg-white p-4 rounded-xl border border-slate-200/60 shadow-sm cursor-grab active:cursor-grabbing
+                  hover:shadow-md hover:border-indigo-200 transition-all
+                  ${stats.usedWorkCards >= QUOTA.work ? 'opacity-50 grayscale pointer-events-none' : ''}
+                `}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-medium text-slate-800">Work Cycle</span>
+                  <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full">3 Days</span>
+                </div>
+                <div className="flex gap-1">
+                  {THEMES.map((t, i) => (
+                    <div key={i} className={`h-2 flex-1 rounded-full ${t.style.split(' ')[0].replace('bg-', 'bg-opacity-80 bg-')}`} />
+                  ))}
+                </div>
+                <div className="mt-3 text-xs text-slate-400 flex items-center gap-1">
+                   <GripHorizontal size={14} /> Drag to calendar
+                </div>
+              </div>
+
+              <div 
+                draggable={stats.usedRestCards < QUOTA.rest}
+                onDragStart={(e) => handleDragStart(e, 'rest')}
+                className={`
+                  group bg-white p-4 rounded-xl border border-slate-200/60 shadow-sm cursor-grab active:cursor-grabbing
+                  hover:shadow-md hover:border-stone-200 transition-all
+                  ${stats.usedRestCards >= QUOTA.rest ? 'opacity-50 grayscale pointer-events-none' : ''}
+                `}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-slate-800">Rest Day</span>
+                  <span className="text-xs bg-stone-100 text-stone-600 px-2 py-1 rounded-full">1 Day</span>
+                </div>
+                 <div className="h-2 w-full rounded-full bg-stone-200" />
+              </div>
+              
+              <button 
+                onClick={resetCalendar}
+                className="w-full py-2 text-xs text-slate-400 hover:text-red-500 transition-colors flex items-center justify-center gap-2"
+              >
+                <RotateCcw size={12} /> Reset Month
+              </button>
             </div>
           </div>
-          {/* 右侧：日历主体 */}
-          <div className="flex-1">
-            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 md:p-6 border border-white/20">
-              {/* 月份切换控制 */}
-              <div className="flex items-center justify-between mb-4">
-                <button
-                  onClick={() => changeMonth(-1)}
-                  className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-all font-medium text-sm"
-                >
-                  ← 上月
-                </button>
-                <div className="text-center">
-                  {/* 当前年月显示 */}
-                  <h2 className="text-2xl font-bold text-white mb-1">
-                    {currentMonth.getFullYear()} 年 {currentMonth.getMonth() + 1} 月
-                  </h2>
-                  {/* 重置按钮 */}
-                  <button
-                    onClick={resetCalendar}
-                    className="text-xs bg-red-500/20 hover:bg-red-500/30 px-2 py-1 rounded transition-all flex items-center gap-1 mx-auto text-white"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    重置
-                  </button>
-                </div>
-                <button
-                  onClick={() => changeMonth(1)}
-                  className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-all font-medium text-sm"
-                >
-                  下月 →
-                </button>
-              </div>
-              {/* 星期标题行 */}
-              <div className="grid grid-cols-7 gap-1 md:gap-2 mb-2">
-                {weekDays.map(day => (
-                  <div key={day} className="text-center text-gray-300 font-bold py-1 text-sm">
+
+          {/* Right: Calendar Grid */}
+          <div className="lg:col-span-9">
+            <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-slate-100 p-8">
+              
+              {/* Weekday Headers */}
+              <div className="grid grid-cols-7 mb-4">
+                {WEEK_DAYS.map(day => (
+                  <div key={day} className="text-center text-xs font-medium text-slate-400 uppercase tracking-widest py-2">
                     {day}
                   </div>
                 ))}
               </div>
-              {/* 日期格子网格 */}
-              <div className="grid grid-cols-7 gap-1 md:gap-2">
-                {calendarDays.map((day, index) => {
-                  // 解析每个格子的状态
-                  const hasCard = day.cardId !== null; // 是否有卡片
-                  const themeIndex = day.themes[0]; // 主题索引
-                  const isWorkDay = day.type === 'work'; // 是否工作日
-                  const isRestDay = day.type === 'rest'; // 是否休息日
+
+              {/* Days Grid */}
+              <div className="grid grid-cols-7 grid-rows-5 gap-3 min-h-[500px]">
+                {days.map((day, index) => {
+                  // 样式逻辑处理
+                  const isWork = day.type === 'work';
+                  const isRest = day.type === 'rest';
+                  const theme = isWork && day.themeIndex !== undefined ? THEMES[day.themeIndex] : REST_THEME;
+                  
+                  // 连续卡片的视觉连接处理
+                  let roundedClass = 'rounded-2xl';
+                  if (isWork) {
+                     if (day.themeIndex === 0) roundedClass = 'rounded-l-2xl rounded-r-md';
+                     else if (day.themeIndex === 1) roundedClass = 'rounded-md';
+                     else if (day.themeIndex === 2) roundedClass = 'rounded-r-2xl rounded-l-md';
+                  }
+
                   return (
                     <div
                       key={index}
-                      onDragOver={handleDragOver} // 允许拖拽经过
-                      onDrop={(e) => handleDrop(e, index)} // 处理放置
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                      onDrop={() => handleDrop(index)}
                       className={`
-                        aspect-square rounded-lg flex flex-col items-center justify-center
-                        transition-all duration-300 relative group
-                        ${!day.date ? 'invisible' : ''} // 空白格子不可见
-                        ${isWorkDay && themeIndex !== undefined
-                          ? `bg-gradient-to-br ${themes[themeIndex].color} shadow-lg border ${themes[themeIndex].borderColor}`
-                          : isRestDay
-                          ? 'bg-gradient-to-br from-pink-400 to-rose-500 shadow-lg border border-pink-300'
-                          : 'bg-white/5 border border-dashed border-white/20 hover:border-white/50 hover:bg-white/10'
+                        relative flex flex-col items-start justify-between p-3 transition-all duration-200
+                        ${!day.date ? 'invisible' : 'visible'}
+                        ${day.type 
+                          ? `${theme.style} ${roundedClass} shadow-sm` 
+                          : 'bg-slate-50/50 border border-transparent hover:border-slate-200 hover:bg-slate-50 rounded-2xl'
                         }
                       `}
                     >
+                      {/* Date Number */}
                       {day.date && (
-                        <>
-                          {/* 日期数字 */}
-                          <span className={`font-bold text-sm ${hasCard ? 'text-white' : 'text-gray-400'}`}>
-                            {day.date}
-                          </span>
-                          {/* 工作日显示主题图标和名称 */}
-                          {isWorkDay && themeIndex !== undefined && (
-                            <div className="mt-0.5 flex flex-col items-center">
-                              <span className="text-lg">{themes[themeIndex].icon}</span>
-                              <span className="text-[8px] text-white/90 mt-0.5 font-medium leading-tight">
-                                {themes[themeIndex].name}
-                              </span>
-                            </div>
-                          )}
-                          {/* 🔥 休息日显示摆烂图标（现在只有1天） */}
-                          {isRestDay && (
-                            <div className="mt-0.5 flex flex-col items-center">
-                              <span className="text-lg">😴</span>
-                              <span className="text-[8px] text-white/90 mt-0.5 font-medium">
-                                摆烂日
-                              </span>
-                            </div>
-                          )}
-                          {/* 拖拽提示（当有卡片正在拖拽时显示） */}
-                          {!hasCard && draggedCard !== null && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-blue-500/20 rounded-lg backdrop-blur-sm">
-                              <span className="text-white text-xs font-medium">放这里</span>
-                            </div>
-                          )}
-                        </>
+                        <span className={`
+                          text-sm font-medium 
+                          ${day.type ? 'opacity-100' : 'text-slate-400'}
+                        `}>
+                          {day.date}
+                        </span>
+                      )}
+
+                      {/* Card Content */}
+                      {day.type && (
+                        <div className="mt-2 w-full">
+                          <div className="flex flex-col items-center justify-center py-2 gap-1">
+                            {theme.icon}
+                            <span className="text-[10px] font-medium tracking-wide opacity-90">
+                              {theme.name}
+                            </span>
+                          </div>
+                          
+                          {/* Delete Button (Hover) */}
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); day.cardGroupId && handleRemove(day.cardGroupId); }}
+                            className="absolute top-1 right-1 p-1 opacity-0 group-hover:opacity-100 hover:bg-black/5 rounded-full transition-opacity"
+                          >
+                            <span className="sr-only">Remove</span>
+                            <div className="w-1.5 h-1.5 bg-current rounded-full opacity-50" />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Drag Indicator */}
+                      {!day.type && dragType && (
+                         <div className="absolute inset-0 border-2 border-indigo-200 border-dashed rounded-2xl pointer-events-none opacity-0 hover:opacity-100 transition-opacity bg-indigo-50/10" />
                       )}
                     </div>
                   );
                 })}
               </div>
             </div>
-            {/* 完成率统计面板 */}
-            <div className="mt-4 bg-white/10 backdrop-blur-lg rounded-lg p-4 border border-white/20">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <div className="text-green-300 text-sm">努力天数</div>
-                  <div className="text-2xl font-bold text-white">{stats.work} 天</div>
-                </div>
-                <div>
-                  <div className="text-pink-300 text-sm">休息天数</div>
-                  <div className="text-2xl font-bold text-white">{stats.rest} 天</div>
-                </div>
-                <div>
-                  <div className="text-purple-300 text-sm">完成率</div>
-                  <div className="text-2xl font-bold text-white">
-                    {stats.total > 0 ? Math.round((stats.work / stats.total) * 100) : 0}%
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
-        {/* 庆祝动画层 */}
-        {showCelebration && (
-          <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-50">
-            <div className="text-6xl md:text-8xl animate-bounce">
-              {draggedCardType === 'work' ? '🎉' : '😴'}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
 };
+
 export default TimeManagementCalendar;
