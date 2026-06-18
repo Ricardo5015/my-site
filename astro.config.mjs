@@ -28,7 +28,7 @@ import react from "@astrojs/react";
 
 // https://astro.build/config
 export default defineConfig({
-    site: "https://fuwari.vercel.app/",
+    site: "https://daydream.click/",
     base: "/",
     trailingSlash: "always",
     integrations: [tailwind({
