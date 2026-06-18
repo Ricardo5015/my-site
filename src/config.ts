@@ -12,6 +12,7 @@ import { LinkPreset } from "./types/config";
 export const siteConfig: SiteConfig = {
 	title: "年年四月菜花黄",  // 网站标题
 	subtitle: "小雨的BLOG",  //网站副标题
+	url: "https://daydream.click",
 	lang: "zh_CN", // 语言代码，例如: 'en'(英语), 'zh_CN'(简体中文), 'ja'(日语) 等
 
     // 主题颜色配置
